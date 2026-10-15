@@ -12,7 +12,7 @@ import re
 import pytest
 
 from deity_informant import ILLEGAL_OPCODES
-from deity_informant.sleigh import LANGDIR
+from deity_informant.sleigh import LANGDIR, smc
 
 SINC = LANGDIR / "6510_illegal.sinc"
 
@@ -75,3 +75,13 @@ def test_stock_6502_rejects_illegals():
     for op in (0x07, 0x47, 0xAB, 0x8B, 0x9F, 0x02):
         with pytest.raises(Exception):
             ctx.disassemble(bytes([op, 0x10, 0x20]), 0x1000, 0)
+
+
+def test_smc_indirect_operands_keep_a_wrapping_zero_page_pointer():
+    """SMC twins must not widen an indirect pointer byte before it wraps."""
+    generated = smc.smc_sinc(SINC.read_text())
+    assert "local zp:1 = *:1 smcp + X" in generated
+    assert "local zp:1 = *:1 smcp;" in generated
+    assert "illegalReadZpPointer(tmp, zp)" in generated
+    assert "local smcop:1 = *:1 smcp;" in generated
+    assert "illegalReadZpPointer(ea, zp)" in generated
