@@ -3,16 +3,194 @@
 <processor_spec>
   <programcounter register="PC"/>
 
+  <!-- The 6510's on-chip I/O port (data direction register at $00, port at $01) and the C64 I/O window:
+       the VIC-II, SID, colour RAM and CIAs are not RAM, so reads must not fold.  The port also switches
+       the BASIC ROM, I/O/character ROM and KERNAL ROM in and out of the address space; Ghidra's address
+       map is static, so that banking is documented (see GHIDRA-RARE.md), not modelled. -->
+  <volatile outputop="write_volatile" inputop="read_volatile">
+    <range space="RAM" first="0x0000" last="0x0001"/>
+    <range space="RAM" first="0xd000" last="0xdfff"/>
+  </volatile>
+
   <default_symbols>
     <symbol name="NMI" address="FFFA" entry="true" type="code_ptr"/>
     <symbol name="RES" address="FFFC" entry="true" type="code_ptr"/>
     <symbol name="IRQ" address="FFFE" entry="true" type="code_ptr"/>
+    <symbol name="CPU_DDR" address="0000"/>
+    <symbol name="CPU_PORT" address="0001"/>
+    <symbol name="CINV" address="0314" type="code_ptr"/>
+    <symbol name="CBINV" address="0316" type="code_ptr"/>
+    <symbol name="NMINV" address="0318" type="code_ptr"/>
+    <symbol name="IOPEN" address="031A" type="code_ptr"/>
+    <symbol name="ICLOSE" address="031C" type="code_ptr"/>
+    <symbol name="ICHKIN" address="031E" type="code_ptr"/>
+    <symbol name="ICKOUT" address="0320" type="code_ptr"/>
+    <symbol name="ICLRCH" address="0322" type="code_ptr"/>
+    <symbol name="IBASIN" address="0324" type="code_ptr"/>
+    <symbol name="IBSOUT" address="0326" type="code_ptr"/>
+    <symbol name="ISTOP" address="0328" type="code_ptr"/>
+    <symbol name="IGETIN" address="032A" type="code_ptr"/>
+    <symbol name="ICLALL" address="032C" type="code_ptr"/>
+    <symbol name="USRCMD" address="032E" type="code_ptr"/>
+    <symbol name="ILOAD" address="0330" type="code_ptr"/>
+    <symbol name="ISAVE" address="0332" type="code_ptr"/>
+    <symbol name="CINT" address="FF81" entry="true"/>
+    <symbol name="IOINIT" address="FF84" entry="true"/>
+    <symbol name="RAMTAS" address="FF87" entry="true"/>
+    <symbol name="RESTOR" address="FF8A" entry="true"/>
+    <symbol name="VECTOR" address="FF8D" entry="true"/>
+    <symbol name="SETMSG" address="FF90" entry="true"/>
+    <symbol name="SECOND" address="FF93" entry="true"/>
+    <symbol name="TKSA" address="FF96" entry="true"/>
+    <symbol name="MEMTOP" address="FF99" entry="true"/>
+    <symbol name="MEMBOT" address="FF9C" entry="true"/>
+    <symbol name="SCNKEY" address="FF9F" entry="true"/>
+    <symbol name="SETTMO" address="FFA2" entry="true"/>
+    <symbol name="ACPTR" address="FFA5" entry="true"/>
+    <symbol name="CIOUT" address="FFA8" entry="true"/>
+    <symbol name="UNTLK" address="FFAB" entry="true"/>
+    <symbol name="UNLSN" address="FFAE" entry="true"/>
+    <symbol name="LISTEN" address="FFB1" entry="true"/>
+    <symbol name="TALK" address="FFB4" entry="true"/>
+    <symbol name="READST" address="FFB7" entry="true"/>
+    <symbol name="SETLFS" address="FFBA" entry="true"/>
+    <symbol name="SETNAM" address="FFBD" entry="true"/>
+    <symbol name="OPEN" address="FFC0" entry="true"/>
+    <symbol name="CLOSE" address="FFC3" entry="true"/>
+    <symbol name="CHKIN" address="FFC6" entry="true"/>
+    <symbol name="CHKOUT" address="FFC9" entry="true"/>
+    <symbol name="CLRCHN" address="FFCC" entry="true"/>
+    <symbol name="CHRIN" address="FFCF" entry="true"/>
+    <symbol name="CHROUT" address="FFD2" entry="true"/>
+    <symbol name="LOAD" address="FFD5" entry="true"/>
+    <symbol name="SAVE" address="FFD8" entry="true"/>
+    <symbol name="SETTIM" address="FFDB" entry="true"/>
+    <symbol name="RDTIM" address="FFDE" entry="true"/>
+    <symbol name="STOP" address="FFE1" entry="true"/>
+    <symbol name="GETIN" address="FFE4" entry="true"/>
+    <symbol name="CLALL" address="FFE7" entry="true"/>
+    <symbol name="UDTIM" address="FFEA" entry="true"/>
+    <symbol name="SCREEN" address="FFED" entry="true"/>
+    <symbol name="PLOT" address="FFF0" entry="true"/>
+    <symbol name="IOBASE" address="FFF3" entry="true"/>
+    <symbol name="M0X" address="D000"/>
+    <symbol name="M0Y" address="D001"/>
+    <symbol name="M1X" address="D002"/>
+    <symbol name="M1Y" address="D003"/>
+    <symbol name="M2X" address="D004"/>
+    <symbol name="M2Y" address="D005"/>
+    <symbol name="M3X" address="D006"/>
+    <symbol name="M3Y" address="D007"/>
+    <symbol name="M4X" address="D008"/>
+    <symbol name="M4Y" address="D009"/>
+    <symbol name="M5X" address="D00A"/>
+    <symbol name="M5Y" address="D00B"/>
+    <symbol name="M6X" address="D00C"/>
+    <symbol name="M6Y" address="D00D"/>
+    <symbol name="M7X" address="D00E"/>
+    <symbol name="M7Y" address="D00F"/>
+    <symbol name="MSBX" address="D010"/>
+    <symbol name="SCROLY" address="D011"/>
+    <symbol name="RASTER" address="D012"/>
+    <symbol name="LPENX" address="D013"/>
+    <symbol name="LPENY" address="D014"/>
+    <symbol name="SPENA" address="D015"/>
+    <symbol name="SCROLX" address="D016"/>
+    <symbol name="YXPAND" address="D017"/>
+    <symbol name="VMCSB" address="D018"/>
+    <symbol name="VICIRQ" address="D019"/>
+    <symbol name="IRQMASK" address="D01A"/>
+    <symbol name="SPBGPR" address="D01B"/>
+    <symbol name="SPMC" address="D01C"/>
+    <symbol name="XXPAND" address="D01D"/>
+    <symbol name="SPSPCL" address="D01E"/>
+    <symbol name="SPBGCL" address="D01F"/>
+    <symbol name="EXTCOL" address="D020"/>
+    <symbol name="BGCOL0" address="D021"/>
+    <symbol name="BGCOL1" address="D022"/>
+    <symbol name="BGCOL2" address="D023"/>
+    <symbol name="BGCOL3" address="D024"/>
+    <symbol name="SPMC0" address="D025"/>
+    <symbol name="SPMC1" address="D026"/>
+    <symbol name="SP0COL" address="D027"/>
+    <symbol name="SP1COL" address="D028"/>
+    <symbol name="SP2COL" address="D029"/>
+    <symbol name="SP3COL" address="D02A"/>
+    <symbol name="SP4COL" address="D02B"/>
+    <symbol name="SP5COL" address="D02C"/>
+    <symbol name="SP6COL" address="D02D"/>
+    <symbol name="SP7COL" address="D02E"/>
+    <symbol name="FRELO1" address="D400"/>
+    <symbol name="FREHI1" address="D401"/>
+    <symbol name="PWLO1" address="D402"/>
+    <symbol name="PWHI1" address="D403"/>
+    <symbol name="VCREG1" address="D404"/>
+    <symbol name="ATDCY1" address="D405"/>
+    <symbol name="SUREL1" address="D406"/>
+    <symbol name="FRELO2" address="D407"/>
+    <symbol name="FREHI2" address="D408"/>
+    <symbol name="PWLO2" address="D409"/>
+    <symbol name="PWHI2" address="D40A"/>
+    <symbol name="VCREG2" address="D40B"/>
+    <symbol name="ATDCY2" address="D40C"/>
+    <symbol name="SUREL2" address="D40D"/>
+    <symbol name="FRELO3" address="D40E"/>
+    <symbol name="FREHI3" address="D40F"/>
+    <symbol name="PWLO3" address="D410"/>
+    <symbol name="PWHI3" address="D411"/>
+    <symbol name="VCREG3" address="D412"/>
+    <symbol name="ATDCY3" address="D413"/>
+    <symbol name="SUREL3" address="D414"/>
+    <symbol name="CUTLO" address="D415"/>
+    <symbol name="CUTHI" address="D416"/>
+    <symbol name="RESON" address="D417"/>
+    <symbol name="SIGVOL" address="D418"/>
+    <symbol name="POTX" address="D419"/>
+    <symbol name="POTY" address="D41A"/>
+    <symbol name="RANDOM" address="D41B"/>
+    <symbol name="ENV3" address="D41C"/>
+    <symbol name="CIA1_PRA" address="DC00"/>
+    <symbol name="CIA1_PRB" address="DC01"/>
+    <symbol name="CIA1_DDRA" address="DC02"/>
+    <symbol name="CIA1_DDRB" address="DC03"/>
+    <symbol name="CIA1_TALO" address="DC04"/>
+    <symbol name="CIA1_TAHI" address="DC05"/>
+    <symbol name="CIA1_TBLO" address="DC06"/>
+    <symbol name="CIA1_TBHI" address="DC07"/>
+    <symbol name="CIA1_TOD10" address="DC08"/>
+    <symbol name="CIA1_TODSEC" address="DC09"/>
+    <symbol name="CIA1_TODMIN" address="DC0A"/>
+    <symbol name="CIA1_TODHR" address="DC0B"/>
+    <symbol name="CIA1_SDR" address="DC0C"/>
+    <symbol name="CIA1_ICR" address="DC0D"/>
+    <symbol name="CIA1_CRA" address="DC0E"/>
+    <symbol name="CIA1_CRB" address="DC0F"/>
+    <symbol name="CIA2_PRA" address="DD00"/>
+    <symbol name="CIA2_PRB" address="DD01"/>
+    <symbol name="CIA2_DDRA" address="DD02"/>
+    <symbol name="CIA2_DDRB" address="DD03"/>
+    <symbol name="CIA2_TALO" address="DD04"/>
+    <symbol name="CIA2_TAHI" address="DD05"/>
+    <symbol name="CIA2_TBLO" address="DD06"/>
+    <symbol name="CIA2_TBHI" address="DD07"/>
+    <symbol name="CIA2_TOD10" address="DD08"/>
+    <symbol name="CIA2_TODSEC" address="DD09"/>
+    <symbol name="CIA2_TODMIN" address="DD0A"/>
+    <symbol name="CIA2_TODHR" address="DD0B"/>
+    <symbol name="CIA2_SDR" address="DD0C"/>
+    <symbol name="CIA2_ICR" address="DD0D"/>
+    <symbol name="CIA2_CRA" address="DD0E"/>
+    <symbol name="CIA2_CRB" address="DD0F"/>
+    <symbol name="COLOR_RAM" address="D800"/>
+    <symbol name="BASIC_COLD" address="A000" type="code_ptr"/>
+    <symbol name="BASIC_WARM" address="A002" type="code_ptr"/>
   </default_symbols>
 
-  <!-- C64 I/O window: VIC/SID/CIA registers are not RAM, so reads must not fold -->
-  <volatile outputop="write_volatile" inputop="read_volatile">
-    <range space="RAM" first="0xd000" last="0xdfff"/>
-  </volatile>
+  <context_data>
+    <tracked_set space="RAM">
+      <set name="SH" val="1"/>
+    </tracked_set>
+  </context_data>
 
   <default_memory_blocks>
     <memory_block name="ZERO_PAGE" start_address="0x0000" length="0x0100" initialized="false"/>
