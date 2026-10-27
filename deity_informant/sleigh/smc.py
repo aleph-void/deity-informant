@@ -83,7 +83,8 @@ def _operand_lines():
             disp, extra, body = MODES[mode]
             bit = "smc_imm" if mode == "imm" else "smc_addr"
             pat = "bbb=%d%s; %s" % (bbb, extra, TOKEN[mode])
-            out.append("%s: %-10s is %s=1 & %s { %s%s }" % (sub, disp, bit, pat, PRE, body))
+            # smc_var=1 is a superset (operand read live, plus the RTS guard): it wins over smc_addr/smc_imm
+            out.append("%s: %-10s is %s=1 & smc_var=0 & %s { %s%s }" % (sub, disp, bit, pat, PRE, body))
             out.append(
                 "%s: %-10s is smc_var=1 & %s { %s%s%s }" % (sub, disp, pat, PRE, RTS_GUARD, body)
             )
