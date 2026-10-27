@@ -1,0 +1,438 @@
+# Hand-computed expectations for the MOS6510 module, worked out from the MOS 6502 programming manual (MCS6500
+# hardware/programming manuals) and, for the undocumented opcodes, "No More Secrets: NMOS 6510 Unintended Opcodes"
+# (v0.91); never copied from the module's output.  Format: see MosEmuTest.java.  Flags start cleared, S = $FF.
+
+############################ legal instructions ############################
+case adc_signed_overflow
+# 0x50 + 0x50 = 0xA0: V (two positives give a negative), N, no carry
+code 18 A9 50 69 50
+asm CLC ; LDA #0x50 ; ADC #0x50
+expect A 0xA0
+expect V 1
+expect N 1
+expect C 0
+expect Z 0
+end
+
+case adc_carry_out
+# 0xFF + 0x00 + 1 = 0x100: A = 0, C and Z set, no overflow
+code 38 A9 FF 69 00
+expect A 0
+expect C 1
+expect Z 1
+expect V 0
+expect N 0
+end
+
+case adc_negative_overflow
+# 0x80 + 0x80 = 0x100: A = 0, C = 1, V = 1 (two negatives give a positive), Z = 1
+code 18 A9 80 69 80
+expect A 0
+expect C 1
+expect V 1
+expect Z 1
+end
+
+case adc_decimal
+# BCD 19 + 28 = 47
+code F8 18 A9 19 69 28
+expect A 0x47
+expect C 0
+end
+
+case adc_decimal_carry
+# BCD 99 + 01 = 100: A = 00, carry out
+code F8 18 A9 99 69 01
+expect A 0x00
+expect C 1
+end
+
+case adc_decimal_with_carry_in
+# BCD 58 + 46 + 1 = 105
+code F8 38 A9 58 69 46
+expect A 0x05
+expect C 1
+end
+
+case sbc_basic
+# 0x50 - 0x30 = 0x20, no borrow (C stays 1)
+code 38 A9 50 E9 30
+expect A 0x20
+expect C 1
+expect V 0
+end
+
+case sbc_borrow
+# 0 - 0 - 1 (carry clear) = 0xFF, borrow (C = 0), N
+code 18 A9 00 E9 00
+expect A 0xFF
+expect C 0
+expect N 1
+end
+
+case sbc_overflow
+# 0x50 - 0xB0 = 0xA0: positive minus negative gives a negative: V, borrow
+code 38 A9 50 E9 B0
+expect A 0xA0
+expect V 1
+expect C 0
+end
+
+case sbc_decimal
+# BCD 46 - 12 = 34
+code F8 38 A9 46 E9 12
+expect A 0x34
+expect C 1
+end
+
+case sbc_decimal_borrow
+# BCD 12 - 21 = 91 with borrow
+code F8 38 A9 12 E9 21
+expect A 0x91
+expect C 0
+end
+
+case cmp_equal
+code A9 40 C9 40
+expect Z 1
+expect C 1
+expect N 0
+end
+
+case cpx_less
+# 0x10 - 0x20: borrow, negative
+code A2 10 E0 20
+expect C 0
+expect N 1
+expect Z 0
+end
+
+case rol_accumulator
+code 38 A9 80 2A
+expect A 0x01
+expect C 1
+end
+
+case ror_memory
+# ROR $10 with C = 0: 0x01 -> 0x00, C = 1, Z = 1
+set mem:0010 1
+code 18 66 10
+expect mem:0010 0
+expect C 1
+expect Z 1
+end
+
+case inx_wraps
+code A2 FF E8
+expect X 0
+expect Z 1
+end
+
+case bit_flags
+# BIT copies bits 7 and 6 of memory into N and V; Z from A & M
+set mem:0010 0xC0
+code A9 01 24 10
+expect N 1
+expect V 1
+expect Z 1
+expect A 1
+end
+
+case indirect_x_pointer_wraps_in_zero_page
+# LDA ($FF,X) with X = 0: the pointer is $FF/$00 (not $FF/$0100)
+set mem:00FF 0x00
+set mem:0000 0x03
+set mem:0100 0x04
+set mem:0300 0x77
+set mem:0400 0x99
+code A2 00 A1 FF
+asm LDX #0x0 ; LDA (0xff,X)
+expect A 0x77
+end
+
+case indirect_x_index_wraps_in_zero_page
+# LDA ($F0,X) with X = $20: pointer at ($F0 + $20) & $FF = $10
+set mem:0010 0x00
+set mem:0011 0x03
+set mem:0300 0x5A
+code A2 20 A1 F0
+expect A 0x5A
+end
+
+case indirect_y_pointer_wraps_in_zero_page
+# LDA ($FF),Y with Y = 1: pointer $0300 from $FF/$00, plus 1
+set mem:00FF 0x00
+set mem:0000 0x03
+set mem:0301 0x55
+set mem:0200 0x11
+code A0 01 B1 FF
+expect A 0x55
+end
+
+case jmp_indirect_page_bug
+# JMP ($02FF): low byte from $02FF, high byte from $0200 (not $0300)
+set mem:02FF 0x10
+set mem:0200 0x12
+set mem:0300 0x13
+at 1210 A9 5A
+code 6C FF 02
+until 1212
+expect A 0x5A
+end
+
+case jsr_rts
+# JSR pushes the address of its last byte (0x1002) high byte first; RTS returns to 0x1003
+at 1010 A9 07 60
+code 20 10 10
+until 1003
+expect A 7
+expect PC 0x1003
+expect S 0xFF
+expect mem:01FF 0x10
+expect mem:01FE 0x02
+end
+
+case pha_pla
+code A9 A5 48 A9 00 68
+expect A 0xA5
+expect N 1
+expect S 0xFF
+expect mem:01FF 0xA5
+end
+
+case php_pushes_break_bit
+# PHP stores P with bits 4 and 5 set: C = 1 -> 0x31
+code 38 08
+expect mem:01FF 0x31
+expect S 0xFE
+end
+
+case plp_loads_flags
+# A = 0xC3 -> N V Z C set (bits 4 and 5 are not flags)
+code A9 C3 48 28
+expect N 1
+expect V 1
+expect Z 1
+expect C 1
+expect D 0
+expect I 0
+end
+
+case brk_pushes_pc_plus_2
+# BRK: push PC+2 (0x1002) and P with B set, set I, jump through ($FFFE)
+set mem:FFFE 0x00
+set mem:FFFF 0x20
+code 00
+until 2000
+expect PC 0x2000
+expect mem:01FF 0x10
+expect mem:01FE 0x02
+expect mem:01FD 0x30
+expect I 1
+expect S 0xFC
+end
+
+case rti_pops_p_then_pc
+# RTI pulls P then PC (no +1)
+set S 0xFC
+set mem:01FD 0x83
+set mem:01FE 0x34
+set mem:01FF 0x12
+code 40
+until 1234
+expect PC 0x1234
+expect N 1
+expect Z 1
+expect C 1
+expect S 0xFF
+end
+
+case branch_taken
+code A9 00 F0 02 A9 01
+expect A 0
+end
+
+case branch_not_taken
+code A9 01 F0 02 A9 05
+expect A 5
+end
+
+case txs_tsx
+code A2 80 9A A2 00 BA
+expect X 0x80
+expect S 0x80
+expect N 1
+end
+
+case stack_pointer_wraps_within_page_one
+# PHA with S = 0 stores at $0100 and S becomes $FF (the stack never leaves page 1)
+set S 0x00
+code A9 77 48
+expect mem:0100 0x77
+expect S 0xFF
+end
+
+case stack_pointer_wraps_on_pull
+# PLA with S = $FF reads $0100
+set mem:0100 0x66
+code 68
+expect A 0x66
+expect S 0x00
+end
+
+############################ undocumented instructions ############################
+case lax_zeropage
+set mem:0020 0x80
+code A7 20
+asm LAX 0x20
+expect A 0x80
+expect X 0x80
+expect N 1
+end
+
+case sax_store
+# SAX stores A & X and changes no flags
+code A9 F0 A2 3C 87 30
+expect mem:0030 0x30
+expect N 0
+expect Z 0
+end
+
+case dcp_decrement_and_compare
+# DCP $40: mem = 0x11 - 1 = 0x10, then CMP A(0x10): Z, C
+set mem:0040 0x11
+code A9 10 C7 40
+expect mem:0040 0x10
+expect Z 1
+expect C 1
+expect A 0x10
+end
+
+case isc_increment_and_subtract
+# ISC $41: mem = 0x0F + 1 = 0x10; A = 0x20 - 0x10 (carry set) = 0x10, C = 1
+set mem:0041 0x0F
+code 38 A9 20 E7 41
+expect mem:0041 0x10
+expect A 0x10
+expect C 1
+end
+
+case slo_shift_and_or
+# SLO $42: mem 0x81 -> 0x02, C = 1; A = 0x01 | 0x02 = 0x03
+set mem:0042 0x81
+code A9 01 07 42
+expect mem:0042 0x02
+expect A 0x03
+expect C 1
+end
+
+case rla_rotate_and_and
+# RLA $43 with C = 1: mem 0x80 -> 0x01, C = 1; A = 0xFF & 0x01
+set mem:0043 0x80
+code 38 A9 FF 27 43
+expect mem:0043 0x01
+expect A 0x01
+expect C 1
+end
+
+case sre_shift_and_eor
+# SRE $44: mem 0x03 -> 0x01, C = 1; A = 0xFF ^ 0x01 = 0xFE
+set mem:0044 0x03
+code A9 FF 47 44
+expect mem:0044 0x01
+expect A 0xFE
+expect C 1
+end
+
+case rra_rotate_and_add
+# RRA $45 with C = 0: mem 0x02 -> 0x01, C = 0; A = 0x10 + 0x01 + 0 = 0x11
+set mem:0045 0x02
+code 18 A9 10 67 45
+expect mem:0045 0x01
+expect A 0x11
+expect C 0
+end
+
+case anc_copies_bit7_to_carry
+code A9 FF 0B 80
+expect A 0x80
+expect N 1
+expect C 1
+end
+
+case alr_and_then_lsr
+code A9 FF 4B 0F
+expect A 0x07
+expect C 1
+end
+
+case arr_binary_mode
+# ARR #$FF with C = 1: (0xFF & 0xFF) ror -> 0xFF; C = bit 6 = 1; V = bit6 ^ bit5 = 0
+code 38 A9 FF 6B FF
+expect A 0xFF
+expect C 1
+expect V 0
+expect N 1
+end
+
+case sbx_subtracts_from_a_and_x
+# SBX #$05: X = (A & X) - 5 = 0x0F - 5 = 0x0A, C = 1 (no borrow)
+code A9 FF A2 0F CB 05
+expect X 0x0A
+expect C 1
+expect A 0xFF
+end
+
+case las_loads_a_x_s
+# LAS $0300,Y: A = X = S = mem & S = 0xAB & 0xF3 = 0xA3
+set S 0xF3
+set mem:0300 0xAB
+code A0 00 BB 00 03
+expect A 0xA3
+expect X 0xA3
+expect S 0xA3
+end
+
+case nop_variants_consume_operands
+code 1A 80 55 04 10 0C 00 03 14 20 1C 00 03
+asm NOP ; NOP #0x55 ; NOP 0x10 ; NOP 0x300 ; NOP 0x20,X ; NOP 0x300,X
+end
+
+case shy_page_cross_replaces_address_high
+# SHY $20F0,X with X = $20 crosses a page ($2110); value = Y & (hi+1) = 0x0F & 0x21 = 0x01, address high := value, so $0110
+code A2 20 A0 0F 9C F0 20
+expect mem:0110 0x01
+end
+
+case shy_no_page_cross
+# SHY $2000,X with X = 1: stores Y & 0x21 = 0x21 at $2001
+code A2 01 A0 FF 9C 00 20
+expect mem:2001 0x21
+end
+
+case isc_decimal_mode
+# SED; SEC; ISC $46: mem 0x12 -> 0x13; A = BCD 46 - 13 = 33
+set mem:0046 0x12
+code F8 38 A9 46 E7 46
+expect A 0x33
+expect mem:0046 0x13
+end
+
+case ane_documented_constant
+# ANE #imm: A = (A | $EE) & X & imm = (0 | EE) & FF & FF = 0xEE (constant is chip dependent; $EE documented)
+code A9 00 A2 FF 8B FF
+expect A 0xEE
+end
+
+case lxa_documented_constant
+# LXA #imm: A = X = (A | $EE) & imm = 0xEE & 0x0F = 0x0E
+code A9 00 AB 0F
+expect A 0x0E
+expect X 0x0E
+end
+
+case broken_expectation_must_fail broken
+# the expectation is deliberately wrong (0x51 instead of 0x50): the harness must report a failure
+code A9 50
+expect A 0x51
+end

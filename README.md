@@ -39,11 +39,36 @@ vm = PcodeVM(mem); run_sub(vm, entry, {}, lift)   # execute a subroutine to its 
 
 ## Ghidra
 
+**Ghidra-Rare:** the Ghidra processor module is now the self-contained directory [`MOS6510/`](MOS6510/) (a normal Ghidra
+extension: install the zip from this repository's Releases page, or link the directory into `Ghidra/Processors/`). It needs no
+`emit-sleigh` step, compiles with Ghidra 12.1.3, 12.1.4 and 12.2, and carries hardware-accuracy fixes and a C64 PRG loader; see
+[`MOS6510/GHIDRA-RARE.md`](MOS6510/GHIDRA-RARE.md) for what was verified and what is still open, and
+[`MOS6510/CREDITS.md`](MOS6510/CREDITS.md) for provenance. Language id: `6510:LE:16:default`. `.prg` files import with the
+"Commodore 64 PRG" loader; raw ROM images import as Raw Binary at their load address.
+
+The original Python route below still builds the upstream (pre-Ghidra-Rare) spec from Ghidra's or pypcode's stock `6502.slaspec`
+for pypcode use; it does not include the Ghidra-Rare fixes (NMOS ADC/SBC, stack-page wrap, `JMP (abs)` page bug, PHP/BRK, SHA/SHX/SHY
+page-crossing) -- use `MOS6510/data/languages` for those.
+
 ```bash
 deity-informant emit-sleigh -o "$GHIDRA_INSTALL_DIR/Ghidra/Processors/6510/data/languages"
 ```
 
-Resolves the stock `6502.slaspec` + SLEIGH compiler from `$GHIDRA_INSTALL_DIR` or a `pypcode` install; the stock spec's `JSR`/`RTS` return address and `SBC` borrow are patched to the hardware's. Import a C64 image as Raw Binary, language `6510:LE:16:default`. `docker build -f Dockerfile.ghidra -t di-ghidra . && docker run --rm di-ghidra` runs the headless integration test.
+Resolves the stock `6502.slaspec` + SLEIGH compiler from `$GHIDRA_INSTALL_DIR` or a `pypcode` install; the stock spec's `JSR`/`RTS` return address and `SBC` borrow are patched to the hardware's. `docker build -f Dockerfile.ghidra -t di-ghidra . && docker run --rm di-ghidra` runs the headless integration test.
+
+### Known limitations (status after Ghidra-Rare verification)
+
+| Limitation | Status |
+|---|---|
+| The committed `6510.slaspec` did not compile (it needed a generated base and SMC files) | Fixed: `MOS6510/` compiles as committed |
+| SMC overlay: overlapping constructors; RTS guard / JSR / stack wrong | Fixed (see `MOS6510/CREDITS.md`) |
+| Stock 6502 ADC (V flag, no decimal mode), pointer wrap, `JMP (abs)` bug, PHP/BRK B bit, BRK return address | Fixed in the module |
+| Stack pointer wrapped out of page 1 (16-bit SP arithmetic) | Fixed: byte-S arithmetic |
+| SHA/SHX/SHY/TAS ignored the page-cross address corruption | Fixed; RDY/DMA instability not modelled |
+| ANE/LXA/SHA... constants are chip dependent (`$EE` used) | Remaining: inherent; `sleigh -DMAGIC=` overrides |
+| 6510 port `$00/$01` bank switching of ROM/I-O | Remaining: Ghidra's address map is static; names and volatile flags only |
+| JAM leaves PC on the opcode (hardware: PC+1, then locked) | Remaining: unobservable by programs |
+| Python build path lacks the fixes | Remaining: use `MOS6510/` for Ghidra |
 
 ## Tests
 
