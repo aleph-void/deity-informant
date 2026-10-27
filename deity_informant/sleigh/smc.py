@@ -71,7 +71,7 @@ BRANCHES = {
 # smc_var=1 -- opcode cell whose other variant is the 1-byte terminator $60.
 RTS_GUARD = (
     "if (*:1 (smcp - 1) != 0x60) goto <base>; "
-    "SP = SP + 1; rt:2 = *:2 SP; SP = SP + 1; return [rt]; <base> "
+    "local rt:2 = 0; pullWord(rt); return [rt + 1]; <base> "
 )
 
 
@@ -88,8 +88,12 @@ def _operand_lines():
             out.append(
                 "%s: %-10s is smc_var=1 & %s { %s%s%s }" % (sub, disp, pat, PRE, RTS_GUARD, body)
             )
+    # JMP (abs) pointer, read live; the NMOS page-wrap bug applies (high byte from the start of the page)
     out.append(
-        "ADDRI: (imm16) is smc_addr=1 & imm16 { %stmp:2 = %s; export *:2 tmp; }" % (PRE, WORD)
+        "ADDRI: (imm16) is smc_addr=1 & imm16 { %slocal loAddr:2 = %s; "
+        "local hiAddr:2 = (loAddr & 0xFF00) | ((loAddr + 1) & 0x00FF); local lo:1 = *:1 loAddr; "
+        "local hi:1 = *:1 hiAddr; local h2:2 = zext(hi); local l2:2 = zext(lo); "
+        "local tmp:2 = (h2 << 8) | l2; export tmp; }" % (PRE, WORD)
     )
     return out
 
@@ -99,10 +103,10 @@ def _control_lines():
     out = [
         ":JMP imm16 is smc_ctrl=1 & op=0x4C; imm16 { %slocal t:2 = %s; goto [t]; }" % (PRE, WORD),
         ":JSR imm16 is smc_ctrl=1 & op=0x20; imm16 "
-        "{ %s*:2 (SP-1) = inst_next; SP = SP-2; local t:2 = %s; call [t]; }" % (PRE, WORD),
+        "{ %slocal ret:2 = inst_next; ret = ret - 1; pushWord(ret); local t:2 = %s; call [t]; }" % (PRE, WORD),
     ]
     out += [
-        ":%s rel is smc_ctrl=1 & op=0x%02X; rel { %slocal t:2 = inst_next + sext(%s); "
+        ":%s REL is smc_ctrl=1 & op=0x%02X; REL { %slocal t:2 = inst_next + sext(%s); "
         "if (%s) goto <fall>; goto [t]; <fall> }" % (mn, op, PRE, BYTE, cond)
         for op, (mn, cond) in sorted(BRANCHES.items())
     ]

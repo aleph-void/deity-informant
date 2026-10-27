@@ -22,74 +22,12 @@
 
 # A 16-bit pointer fetched from the zero page wraps its high-byte read from $FF
 # to $00 rather than crossing into page 1.
-macro illegalReadZpPointer(ptr, zp) {
-    local lo:2 = zext(zp);
-    local zp1:1 = zp + 1;
-    local hi:2 = zext(zp1);
-    ptr = zext(*:1 lo) | (zext(*:1 hi) << 8);
-}
 
 # NMOS ADC, including its decimal-mode flag rules. In binary mode carry() can
 # describe only one addition, so the two partial carries are combined explicitly.
-macro illegalAdcNmos(op1) {
-    local operand:1 = op1;
-    local tmpC:1 = C;
-    local oldA:1 = A;
-    local sum:2;
-
-    if (D) goto <decimal>;
-    C = carry(A, operand);
-    A = A + operand;
-    C = C || carry(A, tmpC);
-    A = A + tmpC;
-    resultFlags(A);
-    V = ((oldA ^ A) & (operand ^ A) & 0x80) != 0;
-    goto <done>;
-
-    <decimal>
-    local binsum:1 = oldA + operand + tmpC;
-    Z = (binsum == 0);
-    local al:2 = (zext(oldA) & 0x0F) + (zext(operand) & 0x0F) + zext(tmpC);
-    if (al < 0x0A) goto <units_ok>;
-    al = ((al + 0x06) & 0x0F) + 0x10;
-    <units_ok>
-    sum = (zext(oldA) & 0xF0) + (zext(operand) & 0xF0) + al;
-    local mid:1 = sum:1;
-    N = (mid s< 0);
-    V = ((oldA ^ mid) & (operand ^ mid) & 0x80) != 0;
-    if (sum < 0xA0) goto <tens_ok>;
-    sum = sum + 0x60;
-    <tens_ok>
-    C = (sum >= 0x100);
-    A = sum:1;
-    <done>
-}
 
 # NMOS SBC. Decimal mode adjusts A, while N/V/Z/C retain the binary result's
 # values; subtraction_flags1 is patched by build.py so C is not-borrow.
-macro illegalSbcNmos(op1) {
-    local operand:1 = op1;
-    local tmpBorrow:1 = !C;
-    local oldA:1 = A;
-    local result:1 = oldA - operand - tmpBorrow;
-    subtraction_flags1(oldA, operand, result);
-
-    if (D) goto <decimal>;
-    A = result;
-    goto <done>;
-
-    <decimal>
-    local al:2 = (zext(oldA) & 0x0F) - (zext(operand) & 0x0F) - zext(tmpBorrow);
-    if (al s>= 0) goto <units_ok>;
-    al = ((al - 0x06) & 0x0F) - 0x10;
-    <units_ok>
-    local diff:2 = (zext(oldA) & 0xF0) - (zext(operand) & 0xF0) + al;
-    if (diff s>= 0) goto <tens_ok>;
-    diff = diff - 0x60;
-    <tens_ok>
-    A = diff:1;
-    <done>
-}
 
 # ---- RMW illegals: read-modify-write, LDA-family bbb indexing (cc=3) ----------
 # OP3 mirrors the base OP1 memory modes (no immediate / bbb=2 slot), exporting a
@@ -269,6 +207,18 @@ OP3: imm16,X   is bbb=7 & X; imm16  { tmp:2 = imm16 + zext(X); export *:1 tmp; }
     resultFlags(v);
 }
 
+# SHA/SHX/SHY/TAS store REG & (high byte of the base address + 1).  When indexing crosses a page, the NMOS chip
+# also replaces the high byte of the target address with that value (the address bus is driven by the same
+# AND).  RDY-dependent drop-off of the AND (DMA cycle stealing) is not modelled.
+macro illegalStoreHigh(tgt, base, reg) {
+    local val:1 = reg & (base(1) + 1);
+    local tgtHi:1 = tgt(1);
+    if (tgtHi == base(1)) goto <store>;
+    tgt = (zext(val) << 8) | zext(tgt:1);
+    <store>
+    *:1 tgt = val;
+}
+
 # ---- unstable "address high" store group (stable AND form; NMS pp.43-50) ------
 # {addr} = REG & (high(base)+1). Page-cross / RDY-drop-off instabilities are
 # non-deterministic and intentionally not modelled.
@@ -277,38 +227,33 @@ OP3: imm16,X   is bbb=7 & X; imm16  { tmp:2 = imm16 + zext(X); export *:1 tmp; }
     local zp:1 = imm8;
     local ptr:2 = 0;
     illegalReadZpPointer(ptr, zp);
-    local h:1 = ptr(1) + 1;
     local tgt:2 = ptr + zext(Y);
-    *:1 tgt = A & X & h;
+    illegalStoreHigh(tgt, ptr, A & X);
 }
 :SHA imm16,Y   is op=0x9F & Y; imm16
 {
     local base:2 = imm16;
-    local h:1 = base(1) + 1;
     local tgt:2 = base + zext(Y);
-    *:1 tgt = A & X & h;
+    illegalStoreHigh(tgt, base, A & X);
 }
 :SHX imm16,Y   is op=0x9E & Y; imm16
 {
     local base:2 = imm16;
-    local h:1 = base(1) + 1;
     local tgt:2 = base + zext(Y);
-    *:1 tgt = X & h;
+    illegalStoreHigh(tgt, base, X);
 }
 :SHY imm16,X   is op=0x9C & X; imm16
 {
     local base:2 = imm16;
-    local h:1 = base(1) + 1;
     local tgt:2 = base + zext(X);
-    *:1 tgt = Y & h;
+    illegalStoreHigh(tgt, base, Y);
 }
 :TAS imm16,Y   is op=0x9B & Y; imm16
 {
     S = A & X;
     local base:2 = imm16;
-    local h:1 = base(1) + 1;
     local tgt:2 = base + zext(Y);
-    *:1 tgt = S & h;
+    illegalStoreHigh(tgt, base, S);
 }
 
 # ---- NOP illegals (DOP/TOP): no effect; memory modes still read (NMS p.40) ----

@@ -1,6 +1,7 @@
-# Ghidra's stock 6502.slaspec (Apache-2.0; identical in Ghidra 12.1.3, 12.1.4, 12.2) with deity-informant's
-# patches (smc.py patch_base): context include, hardware JSR/RTS return address, SBC carry = not borrow.
-# sleigh specification file for MOS 6502
+# MOS 6510 base instruction set: Ghidra's stock 6502.slaspec (Apache-2.0; byte-identical in Ghidra 12.1.3, 12.1.4 and
+# 12.2) with the changes listed in CREDITS.md.  deity-informant (Josh Bailey, CBongo) patched JSR/RTS and the SBC borrow;
+# Ghidra-Rare changes: NMOS ADC/SBC (flags and decimal mode), zero-page pointer wrap for (zp,X)/(zp),Y, JMP (abs) page wrap,
+# PHP/BRK push B=1 and PLP/RTI ignore it, BRK pushes PC+2.  Maintained by hand from here on.
 
 define endian=little;
 define alignment=1;
@@ -33,12 +34,23 @@ define token data (16)
 	imm16 = (0,15)
 ;
 
+# The hardware stack lives in page 1 and its pointer is the byte S: pushes and pulls move S only, so the pointer
+# wraps $00 <-> $FF inside the page.  SH (the page, high byte of SP) is never written; it must read as 1.
+macro pushByte(v) {
+	*:1 SP = v;
+	S = S - 1;
+}
+
+macro pullByte(v) {
+	S = S + 1;
+	v = *:1 SP;
+}
+
 macro popSR() {
-	SP = SP + 1;
-	local ccr = *:1 SP;
+	local ccr:1 = 0;
+	pullByte(ccr);
 	N = ccr[7,1];
 	V = ccr[6,1];
-	B = ccr[4,1];
 	D = ccr[3,1];
 	I = ccr[2,1];
 	Z = ccr[1,1];
@@ -49,13 +61,26 @@ macro pushSR() {
 	local ccr:1 = 0xff;
 	ccr[7,1] = N;
 	ccr[6,1] = V;
-	ccr[4,1] = B;
 	ccr[3,1] = D;
 	ccr[2,1] = I;
 	ccr[1,1] = Z;
 	ccr[0,1] = C;
-	*:1 (SP) = ccr;
-	SP = SP -1;
+	pushByte(ccr);
+}
+
+macro pushWord(w) {
+	local hi:1 = w(1);
+	local lo:1 = w:1;
+	pushByte(hi);
+	pushByte(lo);
+}
+
+macro pullWord(w) {
+	local lo:1 = 0;
+	local hi:1 = 0;
+	pullByte(lo);
+	pullByte(hi);
+	w = (zext(hi) << 8) | zext(lo);
 }
 
 macro resultFlags(value) {
@@ -72,6 +97,71 @@ macro subtraction_flags1(register, operand, result) {
 	C = ( ((complement_register & operand) | (operand & result) | (result & complement_register)) & 0b10000000 ) == 0;
 }
 
+
+macro illegalReadZpPointer(ptr, zp) {
+    local lo:2 = zext(zp);
+    local zp1:1 = zp + 1;
+    local hi:2 = zext(zp1);
+    ptr = zext(*:1 lo) | (zext(*:1 hi) << 8);
+}
+
+macro illegalAdcNmos(op1) {
+    local operand:1 = op1;
+    local tmpC:1 = C;
+    local oldA:1 = A;
+    local sum:2;
+
+    if (D) goto <decimal>;
+    C = carry(A, operand);
+    A = A + operand;
+    C = C || carry(A, tmpC);
+    A = A + tmpC;
+    resultFlags(A);
+    V = ((oldA ^ A) & (operand ^ A) & 0x80) != 0;
+    goto <done>;
+
+    <decimal>
+    local binsum:1 = oldA + operand + tmpC;
+    Z = (binsum == 0);
+    local al:2 = (zext(oldA) & 0x0F) + (zext(operand) & 0x0F) + zext(tmpC);
+    if (al < 0x0A) goto <units_ok>;
+    al = ((al + 0x06) & 0x0F) + 0x10;
+    <units_ok>
+    sum = (zext(oldA) & 0xF0) + (zext(operand) & 0xF0) + al;
+    local mid:1 = sum:1;
+    N = (mid s< 0);
+    V = ((oldA ^ mid) & (operand ^ mid) & 0x80) != 0;
+    if (sum < 0xA0) goto <tens_ok>;
+    sum = sum + 0x60;
+    <tens_ok>
+    C = (sum >= 0x100);
+    A = sum:1;
+    <done>
+}
+
+macro illegalSbcNmos(op1) {
+    local operand:1 = op1;
+    local tmpBorrow:1 = !C;
+    local oldA:1 = A;
+    local result:1 = oldA - operand - tmpBorrow;
+    subtraction_flags1(oldA, operand, result);
+
+    if (D) goto <decimal>;
+    A = result;
+    goto <done>;
+
+    <decimal>
+    local al:2 = (zext(oldA) & 0x0F) - (zext(operand) & 0x0F) - zext(tmpBorrow);
+    if (al s>= 0) goto <units_ok>;
+    al = ((al - 0x06) & 0x0F) - 0x10;
+    <units_ok>
+    local diff:2 = (zext(oldA) & 0xF0) - (zext(operand) & 0xF0) + al;
+    if (diff s>= 0) goto <tens_ok>;
+    diff = diff - 0x60;
+    <tens_ok>
+    A = diff:1;
+    <done>
+}
 
 ################################################################
 # Pseudo Instructions
@@ -95,9 +185,9 @@ OP1: imm16,X    is bbb=7 & X; imm16		{ tmp:2 = imm16 + zext(X); export *:1 tmp; 
 # Absolute Indexed Y
 OP1: imm16,Y    is bbb=6 & Y; imm16		{ tmp:2 = imm16 + zext(Y); export *:1 tmp; }
 # Indirect X
-OP1: (imm8,X)   is bbb=0 & X; imm8		{ addr:2 = zext(imm8 + X); tmp:2 = *:2 addr; export *:1 tmp; }
+OP1: (imm8,X)   is bbb=0 & X; imm8		{ local zp:1 = imm8 + X; tmp:2 = 0; illegalReadZpPointer(tmp, zp); export *:1 tmp; }
 # Indirect Y
-OP1: (imm8),Y   is bbb=4 & Y; imm8		{ addr:2 = imm8; tmp:2 = *:2 addr; tmp = tmp + zext(Y); export *:1 tmp; }
+OP1: (imm8),Y   is bbb=4 & Y; imm8		{ local zp:1 = imm8; tmp:2 = 0; illegalReadZpPointer(tmp, zp); tmp = tmp + zext(Y); export *:1 tmp; }
 
 # Immediate
 OP2: "#"imm8    is bbb=0; imm8			{ tmp:1 = imm8; export tmp; }
@@ -121,7 +211,17 @@ OP2LD: imm16,Y  is bbb=7 & Y; imm16		{ tmp:2 = imm16 + zext(Y); export *:1 tmp; 
 
 ADDR8:  imm8    is imm8		{ export *:1 imm8; }
 ADDR16: imm16   is imm16   	{ export *:1 imm16; }
-ADDRI:  (imm16)   is imm16    { tmp:2 = imm16; export *:2 tmp; }
+# JMP (abs): the NMOS 6502 reads the high byte of the pointer from the start of the same page when the low byte is $FF.
+ADDRI:  (imm16)   is imm16    {
+	local loAddr:2 = imm16;
+	local hiAddr:2 = (loAddr & 0xFF00) | ((loAddr + 1) & 0x00FF);
+	local lo:1 = *:1 loAddr;
+	local hi:1 = *:1 hiAddr;
+	local h2:2 = zext(hi);
+	local l2:2 = zext(lo);
+	local tmp:2 = (h2 << 8) | l2;
+	export tmp;
+}
 
 
 # Instructions
@@ -129,15 +229,7 @@ ADDRI:  (imm16)   is imm16    { tmp:2 = imm16; export *:2 tmp; }
 
 :ADC OP1     is (cc=1 & aaa=3) ... & OP1
 {
-	local op1 = OP1;
-	local tmpC = C;
-	
-	C = carry(A, op1);
-	
-	A = A + op1 + tmpC;
-
-	resultFlags(A);
-	V = C;
+	illegalAdcNmos(OP1);
 }
 
 :AND OP1     is (cc=1 & aaa=1) ... & OP1
@@ -195,9 +287,9 @@ ADDRI:  (imm16)   is imm16    { tmp:2 = imm16; export *:2 tmp; }
 
 :BRK   is op=0x00
 {
-	*:2 (SP - 1) = inst_next;
-	SP = SP - 2;
-	B = 1;
+	local ret:2 = inst_next;
+	ret = ret + 1;
+	pushWord(ret);
 	pushSR();
 	I = 1;
 	local target:2 = 0xFFFE;
@@ -316,8 +408,9 @@ ADDRI:  (imm16)   is imm16    { tmp:2 = imm16; export *:2 tmp; }
 
 :JSR   ADDR16    is op=0x20; ADDR16
 {
-	*:2 (SP-1) = inst_next - 1;
-	SP=SP-2; 
+	local ret:2 = inst_next;
+	ret = ret - 1;
+	pushWord(ret);
 	call ADDR16;
 }
 
@@ -371,14 +464,12 @@ ADDRI:  (imm16)   is imm16    { tmp:2 = imm16; export *:2 tmp; }
 
 :PHA     is op=0x48
 {
-	*:1 (SP) = A;
-	SP = SP - 1;
+	pushByte(A);
 }
 
 :PLA     is op=0x68
 {
-	SP = SP + 1;
-	A = *:1 (SP);
+	pullByte(A);
 	resultFlags(A);
 }
 
@@ -408,33 +499,21 @@ ADDRI:  (imm16)   is imm16    { tmp:2 = imm16; export *:2 tmp; }
 {
 	popSR();
 	
-    SP = SP+1;
-	tmp:2 = *:2 SP;
-	SP = SP+1;
-	
+	local tmp:2 = 0;
+	pullWord(tmp);
 	return [tmp];
 }
 
 :RTS      is op=0x60
 {
-	SP = SP+1;
-	tmp:2 = *:2 SP;
-	SP = SP+1;
-	
+	local tmp:2 = 0;
+	pullWord(tmp);
 	return [tmp+1];
 }
 
 :SBC OP1     is (cc=1 & aaa=7) ... & OP1
 {
-	local op1 = OP1;
-	local result = A - op1 - !C;
-	
-	subtraction_flags1(A, op1, result);
-	A = result;	
-	
-	# resultFlags(tmp);
-	# C = ((A <= op1) * C) | (A < op1);
-	# A = tmp;
+	illegalSbcNmos(OP1);
 }
 
 :SEC     is op=0x38
